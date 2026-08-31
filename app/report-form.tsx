@@ -43,6 +43,7 @@ type Draft = {
 };
 
 type SubmissionRecord = {
+  id?: string;
   recipient: keyof typeof recipientRules;
   trackingId: string;
   address: string;
@@ -141,6 +142,7 @@ export function ReportForm() {
   const [locating, setLocating] = useState(false);
   const [generated, setGenerated] = useState(false);
   const [tracking, setTracking] = useState<Record<string, string>>({});
+  const [lateTracking, setLateTracking] = useState<Record<string, string>>({});
   const [submissions, setSubmissions] = useState<SubmissionRecord[]>(loadSubmissions);
 
   const photoCount = Object.keys(photos).length;
@@ -224,11 +226,12 @@ export function ReportForm() {
 
   function saveTracking(key: keyof typeof recipientRules, value: string) {
     setTracking((current) => ({ ...current, [key]: value }));
-    if (!value.trim()) return;
     const sentAt = new Date();
-    const record: SubmissionRecord = { recipient: key, trackingId: value.trim(), address, sentAt: sentAt.toISOString(), checkAt: futureDate(30).toISOString() };
+    const record: SubmissionRecord = { id: `${key}-${sentAt.getTime()}`, recipient: key, trackingId: value.trim(), address, sentAt: sentAt.toISOString(), checkAt: futureDate(30).toISOString() };
     setSubmissions((current) => {
-      const records = [...current.filter((item) => !(item.recipient === key && item.trackingId === record.trackingId)), record];
+      const records = record.trackingId
+        ? [...current.filter((item) => !(item.recipient === key && item.trackingId === record.trackingId)), record]
+        : [...current, record];
       localStorage.setItem('eco-fix-submissions-v1', JSON.stringify(records));
       return records;
     });
@@ -245,6 +248,18 @@ export function ReportForm() {
     link.download = `proverit-${key}.ics`;
     link.click();
     URL.revokeObjectURL(link.href);
+  }
+
+  function addTrackingLater(record: SubmissionRecord, value: string) {
+    if (!value.trim()) return;
+    setSubmissions((current) => {
+      const records = current.map((item) => {
+        const sameRecord = record.id ? item.id === record.id : item.recipient === record.recipient && item.sentAt === record.sentAt;
+        return sameRecord ? { ...item, trackingId: value.trim() } : item;
+      });
+      localStorage.setItem('eco-fix-submissions-v1', JSON.stringify(records));
+      return records;
+    });
   }
 
   if (generated) {
@@ -270,12 +285,13 @@ export function ReportForm() {
                 <details className="mt-4 rounded-xl bg-stone-50 p-3 text-sm"><summary className="cursor-pointer font-semibold"><FileText className="mr-1.5 inline size-4" />Посмотреть текст</summary><pre className="mt-3 whitespace-pre-wrap font-sans text-xs leading-5 text-stone-700">{complaintFor(recipient)}</pre></details>
                 <Button onClick={() => openSubmission(key)} className="mt-3 h-12 w-full rounded-xl bg-emerald-700 text-base hover:bg-emerald-800">Открыть и подать <ExternalLink className="size-4" /></Button>
                 <div className="mt-3 rounded-xl border border-border bg-stone-50 p-3">
-                  <label className="field-label" htmlFor={`tracking-${key}`}>Номер после отправки</label>
+                  <label className="field-label" htmlFor={`tracking-${key}`}>Номер обращения — если пришёл</label>
+                  <p className="mt-1 text-xs text-muted-foreground">Если номера ещё нет, сохраните отправку без него — номер можно добавить позже.</p>
                   <div className="mt-2 grid grid-cols-[1fr_auto] gap-2">
                     <Input id={`tracking-${key}`} value={tracking[key] || ''} onChange={(event) => setTracking((current) => ({ ...current, [key]: event.target.value }))} placeholder="Например, P001-…" className="h-11 bg-white" />
-                    <Button variant="outline" className="h-11" onClick={() => saveTracking(key, tracking[key] || '')}>Сохранить</Button>
+                    <Button variant="outline" className="h-11" onClick={() => saveTracking(key, tracking[key] || '')}>Сохранить отправку</Button>
                   </div>
-                  <Button variant="ghost" className="mt-2 w-full text-emerald-800" disabled={!tracking[key]} onClick={() => downloadReminder(key)}><CalendarClock />Напомнить через 30 дней</Button>
+                  <Button variant="ghost" className="mt-2 w-full text-emerald-800" onClick={() => downloadReminder(key)}><CalendarClock />Напомнить через 30 дней</Button>
                 </div>
               </section>
             );
@@ -302,13 +318,18 @@ export function ReportForm() {
       <div className="mx-auto max-w-2xl space-y-5 px-4 py-5">
         {submissions.length > 0 && (
           <section className="surface-card">
-            <div className="section-heading"><span className="step-number"><CalendarClock className="size-4" /></span><div><h2>Контроль обращений</h2><p>Регистрационные номера хранятся на этом телефоне</p></div></div>
+            <div className="section-heading"><span className="step-number"><CalendarClock className="size-4" /></span><div><h2>Контроль обращений</h2><p>Данные об отправках хранятся на этом телефоне</p></div></div>
             <div className="space-y-2">
               {submissions.slice().reverse().slice(0, 4).map((record) => {
                 const due = isSubmissionDue(record.checkAt);
+                const recordKey = record.id || `${record.recipient}-${record.sentAt}`;
                 return (
-                  <div key={`${record.recipient}-${record.trackingId}`} className="flex items-center gap-3 rounded-xl border border-border bg-stone-50 p-3">
-                    <div className="min-w-0 flex-1"><p className="truncate text-sm font-bold">{recipientRules[record.recipient].shortName} · № {record.trackingId}</p><p className="text-xs text-muted-foreground">{due ? 'Срок проверки наступил' : `Проверить ${new Date(record.checkAt).toLocaleDateString('ru-RU')}`}</p></div>
+                  <div key={recordKey} className="flex items-start gap-3 rounded-xl border border-border bg-stone-50 p-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-bold">{recipientRules[record.recipient].shortName}{record.trackingId ? ` · № ${record.trackingId}` : ' · номер пока не получен'}</p>
+                      <p className="text-xs text-muted-foreground">{due ? 'Срок проверки наступил' : `Проверить ${new Date(record.checkAt).toLocaleDateString('ru-RU')}`}</p>
+                      {!record.trackingId && <div className="mt-2 grid grid-cols-[1fr_auto] gap-2"><Input aria-label="Добавить номер обращения" value={lateTracking[recordKey] || ''} onChange={(event) => setLateTracking((current) => ({ ...current, [recordKey]: event.target.value }))} placeholder="Добавить номер позже" className="h-9 bg-white text-xs" /><Button type="button" variant="outline" className="h-9 px-3" onClick={() => addTrackingLater(record, lateTracking[recordKey] || '')}>Добавить</Button></div>}
+                    </div>
                     <Badge variant={due ? 'destructive' : 'secondary'}>{due ? 'Проверить' : 'Ожидаем'}</Badge>
                   </div>
                 );
