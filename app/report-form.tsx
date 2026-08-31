@@ -33,6 +33,7 @@ const sourceDescriptions: Record<string, string> = {
 type Draft = {
   address: string;
   coordinates: string;
+  suspectedSourceAddress: string;
   source: string;
   destinations: string[];
   settings: string[];
@@ -52,7 +53,7 @@ type SubmissionRecord = {
 
 function loadDraft(): Draft {
   const defaults: Draft = {
-    address: '', coordinates: '', source: 'Труба', destinations: ['В придорожную канаву', 'В ручей / водоём'],
+    address: '', coordinates: '', suspectedSourceAddress: '', source: 'Труба', destinations: ['В придорожную канаву', 'В ручей / водоём'],
     settings: ['У дороги / обочины'], flowState: 'Слив идёт сейчас',
     signs: ['Резкий запах', 'Повторяется регулярно'], nearWell: true, outsideParcel: true,
   };
@@ -130,6 +131,7 @@ export function ReportForm() {
   const [initialDraft] = useState(loadDraft);
   const [address, setAddress] = useState(initialDraft.address);
   const [coordinates, setCoordinates] = useState(initialDraft.coordinates);
+  const [suspectedSourceAddress, setSuspectedSourceAddress] = useState(initialDraft.suspectedSourceAddress);
   const [source, setSource] = useState(initialDraft.source);
   const [destinations, setDestinations] = useState<string[]>(initialDraft.destinations);
   const [settings, setSettings] = useState<string[]>(initialDraft.settings);
@@ -158,6 +160,7 @@ export function ReportForm() {
       `Адрес: ${address || 'не указан'}`,
       `Координаты: ${coordinates || 'не указаны'}`,
       `Обнаружены признаки сброса сточных вод ${sourceDescriptions[source] || 'из неустановленного источника'}`,
+      suspectedSourceAddress ? `Предполагаемый источник сброса расположен на участке по адресу: ${suspectedSourceAddress}` : '',
       `Места выпуска: ${settings.map((value) => value.toLowerCase()).join(', ') || 'не определены'}`,
       `Маршрут стоков: ${destinations.map((value) => value.toLowerCase()).join(' → ') || 'не определён'}`,
       flowState,
@@ -166,11 +169,11 @@ export function ReportForm() {
       outsideParcel ? 'Коммуникация предположительно находится за границами частного участка' : '',
     ].filter(Boolean);
     return `${details.join('. ')}.`;
-  }, [address, coordinates, destinations, flowState, nearWell, outsideParcel, settings, signs, source]);
+  }, [address, coordinates, destinations, flowState, nearWell, outsideParcel, settings, signs, source, suspectedSourceAddress]);
 
   useEffect(() => {
-    localStorage.setItem('eco-fix-draft-v1', JSON.stringify({ address, coordinates, source, destinations, settings, flowState, signs, nearWell, outsideParcel }));
-  }, [address, coordinates, destinations, flowState, nearWell, outsideParcel, settings, signs, source]);
+    localStorage.setItem('eco-fix-draft-v1', JSON.stringify({ address, coordinates, suspectedSourceAddress, source, destinations, settings, flowState, signs, nearWell, outsideParcel }));
+  }, [address, coordinates, destinations, flowState, nearWell, outsideParcel, settings, signs, source, suspectedSourceAddress]);
 
   function toggleDestination(value: string) {
     setDestinations((current) => current.includes(value) ? current.filter((item) => item !== value) : [...current, value]);
@@ -324,6 +327,11 @@ export function ReportForm() {
             <div className="grid grid-cols-[1fr_auto] gap-2">
               <Input aria-label="Координаты" value={coordinates} onChange={(event) => setCoordinates(event.target.value)} className="h-11 rounded-xl font-mono text-xs" />
               <Button type="button" variant="outline" onClick={locate} className="h-11 rounded-xl px-3"><LocateFixed className={locating ? 'animate-pulse' : ''} />Моё место</Button>
+            </div>
+            <div className="space-y-2 pt-1">
+              <label className="field-label" htmlFor="suspected-source-address">Предполагаемый адрес источника</label>
+              <Input id="suspected-source-address" value={suspectedSourceAddress} onChange={(event) => setSuspectedSourceAddress(event.target.value)} placeholder="Например, соседний участок, дом 12" className="h-11 rounded-xl" />
+              <p className="text-xs text-muted-foreground">Необязательно. Укажите, если источник предположительно связан с конкретным участком.</p>
             </div>
           </div>
         </section>
