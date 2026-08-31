@@ -162,7 +162,7 @@ export function ReportForm() {
       `Маршрут стоков: ${destinations.map((value) => value.toLowerCase()).join(' → ') || 'не определён'}`,
       flowState,
       signs.length ? `Признаки: ${signs.join(', ').toLowerCase()}` : 'Явные внешние признаки не выбраны',
-      nearWell ? 'Рядом расположена частная застройка с возможными колодцами и скважинами' : '',
+      nearWell ? 'Рядом расположена частная застройка, имеются колодцы и скважины, в том числе колодцы на улице' : '',
       outsideParcel ? 'Коммуникация предположительно находится за границами частного участка' : '',
     ].filter(Boolean);
     return `${details.join('. ')}.`;
