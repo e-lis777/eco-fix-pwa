@@ -165,7 +165,7 @@ export function ReportForm() {
       flowState,
       signs.length ? `Признаки: ${signs.join(', ').toLowerCase()}` : 'Явные внешние признаки не выбраны',
       nearWell ? 'Рядом расположена частная застройка, имеются колодцы и скважины, в том числе колодцы на улице' : '',
-      outsideParcel ? 'Коммуникация предположительно находится за границами частного участка' : '',
+      outsideParcel ? 'Источник сброса предположительно связан с участком по указанному адресу, а выпуск выведен за границы этого участка' : '',
     ].filter(Boolean);
     return `${details.join('. ')}.`;
   }, [address, coordinates, destinations, flowState, nearWell, outsideParcel, settings, signs, source]);
@@ -373,7 +373,7 @@ export function ReportForm() {
             <div className="grid gap-2 sm:grid-cols-2">
               {signOptions.map((option) => <CheckRow key={option} checked={signs.includes(option)} onChange={() => toggleSign(option)} label={option} />)}
               <CheckRow checked={nearWell} onChange={() => setNearWell(!nearWell)} label="Рядом колодцы / скважины" />
-              <CheckRow checked={outsideParcel} onChange={() => setOutsideParcel(!outsideParcel)} label="За границей участка" />
+              <CheckRow checked={outsideParcel} onChange={() => setOutsideParcel(!outsideParcel)} label="Выпуск выведен за границы участка" />
             </div>
           </div>
         </section>
