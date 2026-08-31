@@ -35,6 +35,14 @@ type Draft = {
   outsideParcel: boolean;
 };
 
+type SubmissionRecord = {
+  recipient: keyof typeof recipientRules;
+  trackingId: string;
+  address: string;
+  sentAt: string;
+  checkAt: string;
+};
+
 function loadDraft(): Draft {
   const defaults: Draft = {
     address: '', coordinates: '', source: 'Труба', destinations: ['В придорожную канаву', 'В ручей / водоём'],
@@ -60,6 +68,19 @@ function futureDate(days: number) {
   const result = new Date();
   result.setDate(result.getDate() + days);
   return result;
+}
+
+function loadSubmissions(): SubmissionRecord[] {
+  try {
+    const value = JSON.parse(localStorage.getItem('eco-fix-submissions-v1') || '[]') as SubmissionRecord[];
+    return Array.isArray(value) ? value : [];
+  } catch {
+    return [];
+  }
+}
+
+function isSubmissionDue(checkAt: string) {
+  return new Date(checkAt).getTime() <= new Date().getTime();
 }
 
 const recipientRules = {
@@ -108,6 +129,7 @@ export function ReportForm() {
   const [locating, setLocating] = useState(false);
   const [generated, setGenerated] = useState(false);
   const [tracking, setTracking] = useState<Record<string, string>>({});
+  const [submissions, setSubmissions] = useState<SubmissionRecord[]>(loadSubmissions);
 
   const photoCount = Object.keys(photos).length;
   const progress = Math.round((((address ? 1 : 0) + (coordinates ? 1 : 0) + photoCount + 4) / 9) * 100);
@@ -185,10 +207,13 @@ export function ReportForm() {
   function saveTracking(key: keyof typeof recipientRules, value: string) {
     setTracking((current) => ({ ...current, [key]: value }));
     if (!value.trim()) return;
-    const records = JSON.parse(localStorage.getItem('eco-fix-submissions-v1') || '[]') as Array<Record<string, unknown>>;
     const sentAt = new Date();
-    records.push({ recipient: key, trackingId: value.trim(), address, sentAt: sentAt.toISOString(), checkAt: futureDate(30).toISOString() });
-    localStorage.setItem('eco-fix-submissions-v1', JSON.stringify(records));
+    const record: SubmissionRecord = { recipient: key, trackingId: value.trim(), address, sentAt: sentAt.toISOString(), checkAt: futureDate(30).toISOString() };
+    setSubmissions((current) => {
+      const records = [...current.filter((item) => !(item.recipient === key && item.trackingId === record.trackingId)), record];
+      localStorage.setItem('eco-fix-submissions-v1', JSON.stringify(records));
+      return records;
+    });
   }
 
   function downloadReminder(key: keyof typeof recipientRules) {
@@ -257,6 +282,22 @@ export function ReportForm() {
       </header>
 
       <div className="mx-auto max-w-2xl space-y-5 px-4 py-5">
+        {submissions.length > 0 && (
+          <section className="surface-card">
+            <div className="section-heading"><span className="step-number"><CalendarClock className="size-4" /></span><div><h2>Контроль обращений</h2><p>Регистрационные номера хранятся на этом телефоне</p></div></div>
+            <div className="space-y-2">
+              {submissions.slice().reverse().slice(0, 4).map((record) => {
+                const due = isSubmissionDue(record.checkAt);
+                return (
+                  <div key={`${record.recipient}-${record.trackingId}`} className="flex items-center gap-3 rounded-xl border border-border bg-stone-50 p-3">
+                    <div className="min-w-0 flex-1"><p className="truncate text-sm font-bold">{recipientRules[record.recipient].shortName} · № {record.trackingId}</p><p className="text-xs text-muted-foreground">{due ? 'Срок проверки наступил' : `Проверить ${new Date(record.checkAt).toLocaleDateString('ru-RU')}`}</p></div>
+                    <Badge variant={due ? 'destructive' : 'secondary'}>{due ? 'Проверить' : 'Ожидаем'}</Badge>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
         <section className="surface-card">
           <div className="section-heading"><span className="step-number">1</span><div><h2>Место</h2><p>Адрес можно поправить вручную</p></div></div>
           <div className="space-y-3">
