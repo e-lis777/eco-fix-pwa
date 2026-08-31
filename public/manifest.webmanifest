@@ -1,0 +1,12 @@
+{
+  "name": "Экофиксация",
+  "short_name": "Экофиксация",
+  "description": "Фиксация незаконного сброса и подготовка обращений",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f7f4ec",
+  "theme_color": "#166534",
+  "icons": [
+    { "src": "./favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
