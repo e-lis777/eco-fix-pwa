@@ -155,13 +155,15 @@ export function ReportForm() {
 
   const standardizedDescription = useMemo(() => {
     const details = [
-      `По адресу ${address || '[адрес не указан]'}, координаты ${coordinates || '[нет координат]'}`,
-      `обнаружены признаки сброса сточных вод ${sourceDescriptions[source] || 'из неустановленного источника'}`,
-      `места выпуска: ${settings.map((value) => value.toLowerCase()).join(', ') || 'не определены'}; маршрут стоков: ${destinations.map((value) => value.toLowerCase()).join(' → ') || 'не определён'}`,
-      flowState.toLowerCase(),
-      signs.length ? `Признаки: ${signs.join(', ').toLowerCase()}` : 'явные внешние признаки не выбраны',
-      nearWell ? 'рядом расположена частная застройка с возможными колодцами и скважинами' : '',
-      outsideParcel ? 'коммуникация предположительно находится за границами частного участка' : '',
+      `Адрес: ${address || 'не указан'}`,
+      `Координаты: ${coordinates || 'не указаны'}`,
+      `Обнаружены признаки сброса сточных вод ${sourceDescriptions[source] || 'из неустановленного источника'}`,
+      `Места выпуска: ${settings.map((value) => value.toLowerCase()).join(', ') || 'не определены'}`,
+      `Маршрут стоков: ${destinations.map((value) => value.toLowerCase()).join(' → ') || 'не определён'}`,
+      flowState,
+      signs.length ? `Признаки: ${signs.join(', ').toLowerCase()}` : 'Явные внешние признаки не выбраны',
+      nearWell ? 'Рядом расположена частная застройка с возможными колодцами и скважинами' : '',
+      outsideParcel ? 'Коммуникация предположительно находится за границами частного участка' : '',
     ].filter(Boolean);
     return `${details.join('. ')}.`;
   }, [address, coordinates, destinations, flowState, nearWell, outsideParcel, settings, signs, source]);
