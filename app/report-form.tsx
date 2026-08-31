@@ -28,7 +28,7 @@ type Draft = {
   coordinates: string;
   source: string;
   destinations: string[];
-  setting: string;
+  settings: string[];
   flowState: string;
   signs: string[];
   nearWell: boolean;
@@ -46,19 +46,24 @@ type SubmissionRecord = {
 function loadDraft(): Draft {
   const defaults: Draft = {
     address: '', coordinates: '', source: 'Труба', destinations: ['В придорожную канаву', 'В ручей / водоём'],
-    setting: 'У дороги / обочины', flowState: 'Слив идёт сейчас',
+    settings: ['У дороги / обочины'], flowState: 'Слив идёт сейчас',
     signs: ['Резкий запах', 'Повторяется регулярно'], nearWell: true, outsideParcel: true,
   };
   try {
     const saved = localStorage.getItem('eco-fix-draft-v1');
     if (!saved) return defaults;
-    const parsed = JSON.parse(saved) as Partial<Draft> & { destination?: string };
+    const parsed = JSON.parse(saved) as Partial<Draft> & { destination?: string; setting?: string };
     const destinations = Array.isArray(parsed.destinations)
       ? parsed.destinations
       : parsed.destination
         ? [parsed.destination]
         : defaults.destinations;
-    return { ...defaults, ...parsed, destinations };
+    const settings = Array.isArray(parsed.settings)
+      ? parsed.settings
+      : parsed.setting
+        ? [parsed.setting]
+        : defaults.settings;
+    return { ...defaults, ...parsed, destinations, settings };
   } catch {
     return defaults;
   }
@@ -120,7 +125,7 @@ export function ReportForm() {
   const [coordinates, setCoordinates] = useState(initialDraft.coordinates);
   const [source, setSource] = useState(initialDraft.source);
   const [destinations, setDestinations] = useState<string[]>(initialDraft.destinations);
-  const [setting, setSetting] = useState(initialDraft.setting);
+  const [settings, setSettings] = useState<string[]>(initialDraft.settings);
   const [flowState, setFlowState] = useState(initialDraft.flowState);
   const [signs, setSigns] = useState<string[]>(initialDraft.signs);
   const [nearWell, setNearWell] = useState(initialDraft.nearWell);
@@ -145,21 +150,25 @@ export function ReportForm() {
     const details = [
       `По адресу ${address || '[адрес не указан]'}, координаты ${coordinates || '[нет координат]'}`,
       `обнаружен предполагаемый выпуск сточных вод через объект типа «${source.toLowerCase()}»`,
-      `${setting.toLowerCase()}; маршрут стоков: ${destinations.map((value) => value.toLowerCase()).join(' → ') || 'не определён'}`,
+      `места выпуска: ${settings.map((value) => value.toLowerCase()).join(', ') || 'не определены'}; маршрут стоков: ${destinations.map((value) => value.toLowerCase()).join(' → ') || 'не определён'}`,
       flowState.toLowerCase(),
       signs.length ? `Признаки: ${signs.join(', ').toLowerCase()}` : 'явные внешние признаки не выбраны',
       nearWell ? 'рядом расположена частная застройка с возможными колодцами и скважинами' : '',
       outsideParcel ? 'коммуникация предположительно находится за границами частного участка' : '',
     ].filter(Boolean);
     return `${details.join('. ')}.`;
-  }, [address, coordinates, destinations, flowState, nearWell, outsideParcel, setting, signs, source]);
+  }, [address, coordinates, destinations, flowState, nearWell, outsideParcel, settings, signs, source]);
 
   useEffect(() => {
-    localStorage.setItem('eco-fix-draft-v1', JSON.stringify({ address, coordinates, source, destinations, setting, flowState, signs, nearWell, outsideParcel }));
-  }, [address, coordinates, destinations, flowState, nearWell, outsideParcel, setting, signs, source]);
+    localStorage.setItem('eco-fix-draft-v1', JSON.stringify({ address, coordinates, source, destinations, settings, flowState, signs, nearWell, outsideParcel }));
+  }, [address, coordinates, destinations, flowState, nearWell, outsideParcel, settings, signs, source]);
 
   function toggleDestination(value: string) {
     setDestinations((current) => current.includes(value) ? current.filter((item) => item !== value) : [...current, value]);
+  }
+
+  function toggleSetting(value: string) {
+    setSettings((current) => current.includes(value) ? current.filter((item) => item !== value) : [...current, value]);
   }
 
   function toggleSign(value: string) {
@@ -326,7 +335,7 @@ export function ReportForm() {
         <section className="surface-card">
           <div className="section-heading"><span className="step-number">3</span><div><h2>Что происходит</h2><p>Выберите наблюдаемые признаки</p></div></div>
           <ChoiceGroup label="Источник" options={sourceOptions} value={source} onChange={setSource} />
-          <ChoiceGroup label="Где находится выпуск" options={settingOptions} value={setting} onChange={setSetting} />
+          <MultiChoiceGroup label="Где находится выпуск — можно несколько" options={settingOptions} values={settings} onToggle={toggleSetting} ordered={false} />
           <MultiChoiceGroup label="Маршрут стоков — можно несколько" options={destinationOptions} values={destinations} onToggle={toggleDestination} />
           <ChoiceGroup label="Состояние сейчас" options={flowOptions} value={flowState} onChange={setFlowState} />
           <div className="mt-5">
@@ -360,7 +369,7 @@ function ChoiceGroup({ label, options, value, onChange }: { label: string; optio
   return <div className="mt-5 first:mt-0"><p className="field-label mb-2">{label}</p><div className="flex flex-wrap gap-2">{options.map((option) => <button key={option} type="button" onClick={() => onChange(option)} className={value === option ? 'choice-chip choice-chip-active' : 'choice-chip'}>{value === option && <Check className="size-3.5" />}{option}</button>)}</div></div>;
 }
 
-function MultiChoiceGroup({ label, options, values, onToggle }: { label: string; options: string[]; values: string[]; onToggle: (value: string) => void }) {
+function MultiChoiceGroup({ label, options, values, onToggle, ordered = true }: { label: string; options: string[]; values: string[]; onToggle: (value: string) => void; ordered?: boolean }) {
   return (
     <div className="mt-5">
       <p className="field-label mb-2">{label}</p>
@@ -368,10 +377,10 @@ function MultiChoiceGroup({ label, options, values, onToggle }: { label: string;
         {options.map((option) => {
           const selected = values.includes(option);
           const order = selected ? values.indexOf(option) + 1 : null;
-          return <button key={option} type="button" onClick={() => onToggle(option)} className={selected ? 'choice-chip choice-chip-active' : 'choice-chip'}>{selected && <span className="grid size-4 place-items-center rounded-full bg-white/20 text-[10px]">{order}</span>}{option}</button>;
+          return <button key={option} type="button" onClick={() => onToggle(option)} className={selected ? 'choice-chip choice-chip-active' : 'choice-chip'}>{selected && (ordered ? <span className="grid size-4 place-items-center rounded-full bg-white/20 text-[10px]">{order}</span> : <Check className="size-3.5" />)}{option}</button>;
         })}
       </div>
-      <p className="mt-2 text-xs text-muted-foreground">Номера показывают порядок движения воды. Повторное нажатие убирает вариант.</p>
+      <p className="mt-2 text-xs text-muted-foreground">{ordered ? 'Номера показывают порядок движения воды. ' : ''}Повторное нажатие убирает вариант.</p>
     </div>
   );
 }
