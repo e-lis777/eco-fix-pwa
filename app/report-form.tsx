@@ -160,7 +160,7 @@ export function ReportForm() {
       `Адрес: ${address || 'не указан'}`,
       `Координаты: ${coordinates || 'не указаны'}`,
       `Обнаружены признаки сброса сточных вод ${sourceDescriptions[source] || 'из неустановленного источника'}`,
-      suspectedSourceAddress ? `Предполагаемый источник сброса расположен на участке по адресу: ${suspectedSourceAddress}` : '',
+      suspectedSourceAddress ? `Предположительно, источник сброса расположен на участке по адресу: ${suspectedSourceAddress}` : '',
       `Места выпуска: ${settings.map((value) => value.toLowerCase()).join(', ') || 'не определены'}`,
       `Маршрут стоков: ${destinations.map((value) => value.toLowerCase()).join(' → ') || 'не определён'}`,
       flowState,
