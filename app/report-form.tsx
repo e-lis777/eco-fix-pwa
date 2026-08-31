@@ -38,7 +38,6 @@ type Draft = {
   settings: string[];
   flowState: string;
   signs: string[];
-  nearWell: boolean;
   outsideParcel: boolean;
 };
 
@@ -55,7 +54,7 @@ function loadDraft(): Draft {
   const defaults: Draft = {
     address: '', coordinates: '', source: 'Труба', destinations: ['В придорожную канаву', 'В ручей / водоём'],
     settings: ['У дороги / обочины'], flowState: 'Слив идёт сейчас',
-    signs: ['Резкий запах', 'Повторяется регулярно'], nearWell: true, outsideParcel: true,
+    signs: ['Резкий запах', 'Повторяется регулярно'], outsideParcel: true,
   };
   try {
     const saved = localStorage.getItem('eco-fix-draft-v1');
@@ -136,7 +135,6 @@ export function ReportForm() {
   const [settings, setSettings] = useState<string[]>(initialDraft.settings);
   const [flowState, setFlowState] = useState(initialDraft.flowState);
   const [signs, setSigns] = useState<string[]>(initialDraft.signs);
-  const [nearWell, setNearWell] = useState(initialDraft.nearWell);
   const [outsideParcel, setOutsideParcel] = useState(initialDraft.outsideParcel);
   const [photos, setPhotos] = useState<Partial<Record<PhotoSlot, string>>>({});
   const [locating, setLocating] = useState(false);
@@ -150,10 +148,10 @@ export function ReportForm() {
 
   const recipients = useMemo(() => {
     const list: Array<keyof typeof recipientRules> = ['administration', 'minecology'];
-    if (nearWell || signs.includes('Резкий запах')) list.push('rospotrebnadzor');
+    list.push('rospotrebnadzor');
     if (destinations.some((value) => ['В придорожную канаву', 'В ливневую канализацию', 'В ручей / водоём'].includes(value))) list.push('rosprirodnadzor');
     return list;
-  }, [destinations, nearWell, signs]);
+  }, [destinations]);
 
   const standardizedDescription = useMemo(() => {
     const details = [
@@ -164,15 +162,15 @@ export function ReportForm() {
       `Маршрут стоков: ${destinations.map((value) => value.toLowerCase()).join(' → ') || 'не определён'}`,
       flowState,
       signs.length ? `Признаки: ${signs.join(', ').toLowerCase()}` : 'Явные внешние признаки не выбраны',
-      nearWell ? 'Рядом расположена частная застройка, имеются колодцы и скважины, в том числе колодцы на улице' : '',
+      'Рядом расположена частная застройка, имеются колодцы и скважины, в том числе колодцы на улице',
       outsideParcel ? 'Источник сброса предположительно связан с участком по указанному адресу, а выпуск выведен за границы этого участка' : '',
     ].filter(Boolean);
     return `${details.join('. ')}.`;
-  }, [address, coordinates, destinations, flowState, nearWell, outsideParcel, settings, signs, source]);
+  }, [address, coordinates, destinations, flowState, outsideParcel, settings, signs, source]);
 
   useEffect(() => {
-    localStorage.setItem('eco-fix-draft-v1', JSON.stringify({ address, coordinates, source, destinations, settings, flowState, signs, nearWell, outsideParcel }));
-  }, [address, coordinates, destinations, flowState, nearWell, outsideParcel, settings, signs, source]);
+    localStorage.setItem('eco-fix-draft-v1', JSON.stringify({ address, coordinates, source, destinations, settings, flowState, signs, outsideParcel }));
+  }, [address, coordinates, destinations, flowState, outsideParcel, settings, signs, source]);
 
   function toggleDestination(value: string) {
     setDestinations((current) => current.includes(value) ? current.filter((item) => item !== value) : [...current, value]);
@@ -372,7 +370,6 @@ export function ReportForm() {
             <p className="field-label mb-2">Признаки</p>
             <div className="grid gap-2 sm:grid-cols-2">
               {signOptions.map((option) => <CheckRow key={option} checked={signs.includes(option)} onChange={() => toggleSign(option)} label={option} />)}
-              <CheckRow checked={nearWell} onChange={() => setNearWell(!nearWell)} label="Рядом колодцы / скважины" />
               <CheckRow checked={outsideParcel} onChange={() => setOutsideParcel(!outsideParcel)} label="Выпуск выведен за границы участка" />
             </div>
           </div>
