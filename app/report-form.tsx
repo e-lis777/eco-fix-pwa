@@ -23,6 +23,13 @@ const signOptions = ['Резкий запах', 'Мутная или окраш�
 const settingOptions = ['У дороги / обочины', 'У забора участка', 'На земле общего пользования', 'В канаве'];
 const flowOptions = ['Слив идёт сейчас', 'Свежие мокрые следы', 'Постоянно мокро', 'Запах без видимого потока'];
 
+const sourceDescriptions: Record<string, string> = {
+  'Труба': 'из трубы',
+  'Колодец': 'через колодец',
+  'Отверстие в заборе': 'через отверстие в заборе',
+  'Неясно': 'из неустановленного источника',
+};
+
 type Draft = {
   address: string;
   coordinates: string;
@@ -149,7 +156,7 @@ export function ReportForm() {
   const standardizedDescription = useMemo(() => {
     const details = [
       `По адресу ${address || '[адрес не указан]'}, координаты ${coordinates || '[нет координат]'}`,
-      `обнаружен предполагаемый выпуск сточных вод через объект типа «${source.toLowerCase()}»`,
+      `обнаружены признаки сброса сточных вод ${sourceDescriptions[source] || 'из неустановленного источника'}`,
       `места выпуска: ${settings.map((value) => value.toLowerCase()).join(', ') || 'не определены'}; маршрут стоков: ${destinations.map((value) => value.toLowerCase()).join(' → ') || 'не определён'}`,
       flowState.toLowerCase(),
       signs.length ? `Признаки: ${signs.join(', ').toLowerCase()}` : 'явные внешние признаки не выбраны',
