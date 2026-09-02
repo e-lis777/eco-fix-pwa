@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import JSZip from 'jszip';
 import { ArrowLeft, CalendarClock, Camera, Check, ChevronRight, ClipboardCheck, Download, ExternalLink, FileText, Images, LoaderCircle, LocateFixed, MapPin, ShieldCheck, Waves } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
@@ -209,6 +210,8 @@ const recipientRules = {
     name: 'Администрация Одинцовского городского округа',
     category: 'Благоустройство → незаконный сброс / самовольная коммуникация',
     portal: 'https://dobrodel.mosreg.ru/',
+    filePrefix: 'Администрация-Одинцовского-округа',
+    attachmentRule: 'Прикрепите 3 общих фото и заявление JPG. Всего 4 файла, суммарно до 5 МБ.',
     request: 'проверить законность размещения коммуникации за границами участка, установить владельца и принять меры к демонтажу и восстановлению территории',
     shortRequest: 'Прошу обследовать место, установить источник и владельца, прекратить сброс, демонтировать незаконный выпуск и восстановить территорию.',
   },
@@ -217,6 +220,8 @@ const recipientRules = {
     name: 'Министерство экологии и природопользования Московской области',
     category: 'Загрязнение почвы → сброс сточных вод',
     portal: 'https://mep.mosreg.ru/feedback',
+    filePrefix: 'Минэкологии-Московской-области',
+    attachmentRule: 'Прикрепите 3 общих фото и заявление JPG. Форма принимает несколько файлов.',
     request: 'провести выездное обследование, отбор проб жидкости и грунта, установить источник загрязнения и рассчитать вред окружающей среде',
     shortRequest: 'Прошу провести обследование, отобрать пробы, установить источник загрязнения, прекратить сброс и принять меры к виновному лицу.',
   },
@@ -225,6 +230,8 @@ const recipientRules = {
     name: 'Управление Роспотребнадзора по Московской области',
     category: 'Санитарное состояние территории → угроза водоснабжению',
     portal: 'https://petition.rospotrebnadzor.ru/petition/',
+    filePrefix: 'Роспотребнадзор',
+    attachmentRule: 'Прикрепите только один ZIP-архив: внутри находятся 3 фото и заявление. Размер архива — до 15 МБ.',
     request: 'оценить санитарно-эпидемиологическую угрозу, включая возможное загрязнение грунтовых вод, колодцев и скважин',
     shortRequest: 'Прошу оценить санитарную угрозу, проверить риск загрязнения грунтовых вод, колодцев и скважин и принять меры.',
   },
@@ -233,6 +240,8 @@ const recipientRules = {
     name: 'Межрегиональное управление Росприроднадзора по Московской и Смоленской областям',
     category: 'Водное законодательство → сброс сточных вод',
     portal: 'https://rpn.gov.ru/petition/',
+    filePrefix: 'Росприроднадзор',
+    attachmentRule: 'Прикрепите 3 общих фото и заявление JPG. Всего 4 файла; каждый должен быть меньше 10 МБ.',
     request: 'проверить попадание стоков в поверхностный водный объект и наличие оснований для федерального экологического надзора',
     shortRequest: 'Прошу проверить попадание стоков в водный объект, установить источник, прекратить сброс и принять надзорные меры.',
   },
@@ -251,12 +260,12 @@ export function ReportForm() {
   const [photos, setPhotos] = useState<Partial<Record<PhotoSlot, CapturedPhoto>>>({});
   const [locating, setLocating] = useState(false);
   const [generated, setGenerated] = useState(false);
-  const [preparingPhotos, setPreparingPhotos] = useState(false);
+  const [preparingAllFiles, setPreparingAllFiles] = useState(false);
   const [preparedPhotos, setPreparedPhotos] = useState<PreparedFile[]>([]);
-  const [photoPrepareError, setPhotoPrepareError] = useState('');
-  const [preparingStatementFor, setPreparingStatementFor] = useState<keyof typeof recipientRules | null>(null);
   const [preparedStatements, setPreparedStatements] = useState<Partial<Record<keyof typeof recipientRules, PreparedFile>>>({});
-  const [statementErrors, setStatementErrors] = useState<Partial<Record<keyof typeof recipientRules, string>>>({});
+  const [rospotrebnadzorArchive, setRospotrebnadzorArchive] = useState<PreparedFile | null>(null);
+  const [preparedFingerprint, setPreparedFingerprint] = useState('');
+  const [filePrepareError, setFilePrepareError] = useState('');
   const [tracking, setTracking] = useState<Record<string, string>>({});
   const [lateTracking, setLateTracking] = useState<Record<string, string>>({});
   const [submissions, setSubmissions] = useState<SubmissionRecord[]>(loadSubmissions);
@@ -285,6 +294,12 @@ export function ReportForm() {
     ].filter(Boolean);
     return `${details.join('. ')}.`;
   }, [address, coordinates, destinations, flowState, outsideParcel, settings, signs, source]);
+
+  const draftFingerprint = useMemo(
+    () => JSON.stringify({ address, coordinates, source, destinations, settings, flowState, signs, outsideParcel }),
+    [address, coordinates, destinations, flowState, outsideParcel, settings, signs, source],
+  );
+  const filesAreCurrent = preparedFingerprint === draftFingerprint;
 
   function shortComplaintFor(key: keyof typeof recipientRules) {
     const safeAddress = (address || 'не указан').slice(0, 120);
@@ -349,8 +364,11 @@ export function ReportForm() {
     });
     preparedPhotos.forEach((item) => URL.revokeObjectURL(item.url));
     Object.values(preparedStatements).forEach((item) => item && URL.revokeObjectURL(item.url));
+    if (rospotrebnadzorArchive) URL.revokeObjectURL(rospotrebnadzorArchive.url);
     setPreparedPhotos([]);
     setPreparedStatements({});
+    setRospotrebnadzorArchive(null);
+    setPreparedFingerprint('');
   }
 
   function complaintFor(recipient: (typeof recipientRules)[keyof typeof recipientRules]) {
@@ -363,46 +381,55 @@ export function ReportForm() {
     window.open(recipient.portal, '_blank', 'noopener,noreferrer');
   }
 
-  async function prepareSharedPhotos() {
+  async function prepareAllFiles() {
     const selected = photoSlots.map((slot) => ({ slot, photo: photos[slot.id] })).filter((item): item is { slot: (typeof photoSlots)[number]; photo: CapturedPhoto } => Boolean(item.photo));
     if (selected.length !== 3) return;
-    setPreparingPhotos(true);
-    setPhotoPrepareError('');
+    setPreparingAllFiles(true);
+    setFilePrepareError('');
     try {
       let photoBlobs = await Promise.all(selected.map(({ slot, photo }, index) => makeWatermarkedPhoto(photo, `${index + 1}. ${slot.title}`, coordinates)));
-      if (photoBlobs.reduce((sum, blob) => sum + blob.size, 0) > 4.4 * 1024 * 1024) {
+      const recipientKeys = Object.keys(recipientRules) as Array<keyof typeof recipientRules>;
+      const statementBlobs: Partial<Record<keyof typeof recipientRules, Blob>> = {};
+      for (const key of recipientKeys) statementBlobs[key] = await makeStatementImage(complaintFor(recipientRules[key]));
+      const administrationStatement = statementBlobs.administration;
+      if (!administrationStatement) throw new Error('Не удалось подготовить заявление для администрации');
+      if (photoBlobs.reduce((sum, blob) => sum + blob.size, administrationStatement.size) > 4.8 * 1024 * 1024) {
         photoBlobs = await Promise.all(selected.map(({ slot, photo }, index) => makeWatermarkedPhoto(photo, `${index + 1}. ${slot.title}`, coordinates, 1200, 0.62)));
       }
-      const totalSize = photoBlobs.reduce((sum, blob) => sum + blob.size, 0);
-      if (totalSize > 4.5 * 1024 * 1024) throw new Error('Три фотографии занимают слишком много места. Попробуйте переснять их с меньшим разрешением.');
+      const photosSize = photoBlobs.reduce((sum, blob) => sum + blob.size, 0);
+      if (photosSize + administrationStatement.size > 5 * 1024 * 1024) throw new Error('Комплект для «Добродела» превышает 5 МБ. Попробуйте переснять фотографии с меньшим разрешением.');
+      const photoNames = ['01-obshchiy-vid.jpg', '02-tochka-sliva.jpg', '03-kommunikatsiya.jpg'] as const;
+      const rospotrebStatement = statementBlobs.rospotrebnadzor;
+      if (!rospotrebStatement) throw new Error('Не удалось подготовить заявление для Роспотребнадзора');
+      const zip = new JSZip();
+      photoNames.forEach((name, index) => zip.file(name, photoBlobs[index]));
+      zip.file(`${recipientRules.rospotrebnadzor.filePrefix}-заявление.jpg`, rospotrebStatement);
+      const archiveBlob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+      if (archiveBlob.size > 15 * 1024 * 1024) throw new Error('Архив для Роспотребнадзора превышает 15 МБ');
       preparedPhotos.forEach((item) => URL.revokeObjectURL(item.url));
-      const files = [
-        { name: '01-obshchiy-vid.jpg', label: '1. Общий вид', url: URL.createObjectURL(photoBlobs[0]), size: photoBlobs[0].size },
-        { name: '02-tochka-sliva.jpg', label: '2. Точка слива', url: URL.createObjectURL(photoBlobs[1]), size: photoBlobs[1].size },
-        { name: '03-kommunikatsiya.jpg', label: '3. Коммуникация', url: URL.createObjectURL(photoBlobs[2]), size: photoBlobs[2].size },
-      ];
-      setPreparedPhotos(files);
+      Object.values(preparedStatements).forEach((item) => item && URL.revokeObjectURL(item.url));
+      if (rospotrebnadzorArchive) URL.revokeObjectURL(rospotrebnadzorArchive.url);
+      const photoFiles = photoNames.map((name, index) => ({
+        name,
+        label: `${index + 1}. ${photoSlots[index].title}`,
+        url: URL.createObjectURL(photoBlobs[index]),
+        size: photoBlobs[index].size,
+      }));
+      const statementFiles: Partial<Record<keyof typeof recipientRules, PreparedFile>> = {};
+      for (const key of recipientKeys) {
+        const blob = statementBlobs[key];
+        if (!blob) continue;
+        const prefix = recipientRules[key].filePrefix;
+        statementFiles[key] = { name: `${prefix}-заявление.jpg`, label: `${recipientRules[key].shortName} — заявление`, url: URL.createObjectURL(blob), size: blob.size };
+      }
+      setPreparedPhotos(photoFiles);
+      setPreparedStatements(statementFiles);
+      setRospotrebnadzorArchive({ name: 'Роспотребнадзор-пакет.zip', label: 'Роспотребнадзор — единый ZIP', url: URL.createObjectURL(archiveBlob), size: archiveBlob.size });
+      setPreparedFingerprint(draftFingerprint);
     } catch (error) {
-      setPhotoPrepareError(error instanceof Error ? error.message : 'Не удалось подготовить фотографии');
+      setFilePrepareError(error instanceof Error ? error.message : 'Не удалось подготовить вложения');
     } finally {
-      setPreparingPhotos(false);
-    }
-  }
-
-  async function prepareStatement(key: keyof typeof recipientRules) {
-    setPreparingStatementFor(key);
-    setStatementErrors((current) => ({ ...current, [key]: '' }));
-    try {
-      const blob = await makeStatementImage(complaintFor(recipientRules[key]));
-      const photosSize = preparedPhotos.reduce((sum, file) => sum + file.size, 0);
-      if (photosSize + blob.size > 5 * 1024 * 1024) throw new Error('Общий размер фотографий и заявления превышает 5 МБ. Сначала подготовьте фотографии заново.');
-      if (preparedStatements[key]) URL.revokeObjectURL(preparedStatements[key].url);
-      const statement = { name: `04-polnoe-zayavlenie-${key}.jpg`, label: 'Полное заявление', url: URL.createObjectURL(blob), size: blob.size };
-      setPreparedStatements((current) => ({ ...current, [key]: statement }));
-    } catch (error) {
-      setStatementErrors((current) => ({ ...current, [key]: error instanceof Error ? error.message : 'Не удалось подготовить заявление' }));
-    } finally {
-      setPreparingStatementFor(null);
+      setPreparingAllFiles(false);
     }
   }
 
@@ -457,36 +484,48 @@ export function ReportForm() {
         <div className="mx-auto max-w-2xl space-y-4 px-4 py-5">
           <section className="rounded-2xl bg-emerald-950 p-5 text-emerald-50">
             <div className="flex items-center gap-2 font-bold"><ClipboardCheck className="size-5 text-emerald-300" />Данные проверены</div>
-            <p className="mt-2 text-sm leading-6 text-emerald-50/80">Три фотографии подготовьте и сохраните один раз. Для каждого ведомства отдельно сохраните только его заявление JPG; короткий текст скопируется при нажатии «Открыть и подать».</p>
+            <p className="mt-2 text-sm leading-6 text-emerald-50/80">Одно действие подготовит три общих фотографии, заявления для всех ведомств и единый ZIP для Роспотребнадзора. Короткий текст скопируется при нажатии «Открыть и подать».</p>
           </section>
           <section className="surface-card">
-            <div className="flex gap-3"><span className="step-number"><Images className="size-4" /></span><div><h2 className="font-bold">Общие фотографии</h2><p className="mt-0.5 text-xs text-muted-foreground">Одни и те же три файла для всех ведомств</p></div></div>
-            <Button type="button" variant="outline" className="mt-4 h-11 w-full" onClick={prepareSharedPhotos} disabled={preparingPhotos}>{preparingPhotos ? <LoaderCircle className="animate-spin" /> : <Images />}Подготовить 3 фото один раз</Button>
-            {photoPrepareError && <p className="mt-2 text-xs font-medium text-red-700">{photoPrepareError}</p>}
-            {preparedPhotos.length > 0 && <div className="mt-3 space-y-2">
-              <div className="flex items-center justify-between text-xs text-muted-foreground"><span>Фото с датой, временем и координатами</span><strong>{formatSize(preparedPhotos.reduce((sum, file) => sum + file.size, 0))}</strong></div>
-              {preparedPhotos.map((file) => <Button key={file.name} type="button" variant="outline" className="h-10 w-full justify-between bg-white px-3" onClick={() => downloadPreparedFile(file)}><span className="truncate">{file.label}</span><span className="flex items-center gap-1 text-xs text-muted-foreground">{formatSize(file.size)} <Download className="size-4" /></span></Button>)}
-              <p className="text-xs leading-5 text-muted-foreground">Сохраните эти три JPG в «Загрузки» один раз и прикладывайте их к каждому обращению.</p>
+            <div className="flex gap-3"><span className="step-number"><Images className="size-4" /></span><div><h2 className="font-bold">Все вложения</h2><p className="mt-0.5 text-xs text-muted-foreground">Фото готовятся один раз, заявления — сразу для четырёх ведомств</p></div></div>
+            <Button type="button" variant="outline" className="mt-4 h-11 w-full" onClick={prepareAllFiles} disabled={preparingAllFiles}>{preparingAllFiles ? <LoaderCircle className="animate-spin" /> : <Images />}{preparingAllFiles ? 'Подготовка файлов…' : 'Подготовить фото и все заявления'}</Button>
+            {filePrepareError && <p className="mt-2 text-xs font-medium text-red-700">{filePrepareError}</p>}
+            {filesAreCurrent && preparedPhotos.length === 3 && <div className="mt-4 space-y-4">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-xs text-muted-foreground"><span>Общие фото с датой, временем и координатами</span><strong>{formatSize(preparedPhotos.reduce((sum, file) => sum + file.size, 0))}</strong></div>
+                {preparedPhotos.map((file) => <Button key={file.name} type="button" variant="outline" className="h-10 w-full justify-between bg-white px-3" onClick={() => downloadPreparedFile(file)}><span className="truncate">{file.label}</span><span className="flex items-center gap-1 text-xs text-muted-foreground">{formatSize(file.size)} <Download className="size-4" /></span></Button>)}
+              </div>
+              <div className="space-y-2">
+                <p className="text-xs font-bold text-foreground">Заявления и пакет Роспотребнадзора</p>
+                {(['administration', 'minecology'] as const).map((key) => {
+                  const file = preparedStatements[key];
+                  return file ? <Button key={key} type="button" variant="outline" className="h-10 w-full justify-between bg-white px-3" onClick={() => downloadPreparedFile(file)}><span className="truncate">{file.name}</span><span className="flex items-center gap-1 text-xs text-muted-foreground">{formatSize(file.size)} <Download className="size-4" /></span></Button> : null;
+                })}
+                {rospotrebnadzorArchive && <Button type="button" variant="outline" className="h-10 w-full justify-between bg-white px-3" onClick={() => downloadPreparedFile(rospotrebnadzorArchive)}><span className="truncate">{rospotrebnadzorArchive.name}</span><span className="flex items-center gap-1 text-xs text-muted-foreground">{formatSize(rospotrebnadzorArchive.size)} <Download className="size-4" /></span></Button>}
+                {preparedStatements.rosprirodnadzor && <Button type="button" variant="outline" className="h-10 w-full justify-between bg-white px-3" onClick={() => downloadPreparedFile(preparedStatements.rosprirodnadzor!)}><span className="truncate">{preparedStatements.rosprirodnadzor.name}</span><span className="flex items-center gap-1 text-xs text-muted-foreground">{formatSize(preparedStatements.rosprirodnadzor.size)} <Download className="size-4" /></span></Button>}
+              </div>
+              <p className="text-xs leading-5 text-muted-foreground">Скачайте файлы в «Загрузки». Для Роспотребнадзора нужен только ZIP; для остальных ведомств — три общих фото и соответствующее заявление JPG.</p>
             </div>}
           </section>
           {recipients.map((key, index) => {
             const recipient = recipientRules[key];
             const shortText = shortComplaintFor(key);
-            const statement = preparedStatements[key];
-            const packageSize = preparedPhotos.reduce((sum, file) => sum + file.size, statement?.size || 0);
-            const isPreparing = preparingStatementFor === key;
+            const statement = filesAreCurrent ? preparedStatements[key] : undefined;
+            const packageSize = key === 'rospotrebnadzor'
+              ? (filesAreCurrent ? rospotrebnadzorArchive?.size : 0) || 0
+              : preparedPhotos.reduce((sum, file) => sum + file.size, statement?.size || 0);
             return (
               <section key={key} className="surface-card">
                 <div className="flex gap-3"><span className="step-number">{index + 1}</span><div className="min-w-0 flex-1"><h2 className="font-bold">{recipient.shortName}</h2><p className="mt-0.5 text-xs text-muted-foreground">{recipient.category}</p></div></div>
                 <div className="mt-4 rounded-xl border border-emerald-900/15 bg-emerald-50 p-3">
                   <div className="flex items-center justify-between gap-2"><p className="text-sm font-bold text-emerald-950">Короткий текст для формы</p><Badge variant="secondary">{shortText.length} / 500</Badge></div>
                   <p className="mt-2 text-xs leading-5 text-emerald-950/80">{shortText}</p>
-                  <Button type="button" variant="outline" className="mt-3 h-11 w-full bg-white" onClick={() => prepareStatement(key)} disabled={preparingStatementFor !== null}>{isPreparing ? <LoaderCircle className="animate-spin" /> : <FileText />}Подготовить заявление JPG</Button>
-                  {statementErrors[key] && <p className="mt-2 text-xs font-medium text-red-700">{statementErrors[key]}</p>}
-                  {statement && <div className="mt-3 space-y-2">
-                    <Button type="button" variant="outline" className="h-10 w-full justify-between bg-white px-3" onClick={() => downloadPreparedFile(statement)}><span className="truncate">Скачать заявление JPG</span><span className="flex items-center gap-1 text-xs text-muted-foreground">{formatSize(statement.size)} <Download className="size-4" /></span></Button>
-                    <div className="flex items-center justify-between text-xs text-emerald-950/75"><span>3 общих фото + это заявление</span><strong>{formatSize(packageSize)} из 5 МБ</strong></div>
-                  </div>}
+                </div>
+                <div className="mt-3 rounded-xl border border-border bg-stone-50 p-3">
+                  <p className="field-label">Что прикрепить</p>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">{recipient.attachmentRule}</p>
+                  {key === 'rospotrebnadzor' && filesAreCurrent && rospotrebnadzorArchive && <p className="mt-2 break-words text-xs font-semibold">{rospotrebnadzorArchive.name} · {formatSize(packageSize)}</p>}
+                  {key !== 'rospotrebnadzor' && statement && <p className="mt-2 break-words text-xs font-semibold">Три общих фото + {statement.name} · всего {formatSize(packageSize)}</p>}
                 </div>
                 <details className="mt-4 rounded-xl bg-stone-50 p-3 text-sm"><summary className="cursor-pointer font-semibold"><FileText className="mr-1.5 inline size-4" />Полное заявление</summary><pre className="mt-3 whitespace-pre-wrap font-sans text-xs leading-5 text-stone-700">{complaintFor(recipient)}</pre></details>
                 <Button onClick={() => openSubmission(key)} className="mt-3 h-12 w-full rounded-xl bg-emerald-700 text-base hover:bg-emerald-800">Открыть и подать <ExternalLink className="size-4" /></Button>
