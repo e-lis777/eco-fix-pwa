@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, CalendarClock, Camera, Check, ChevronRight, ClipboardCheck, ExternalLink, FileText, LocateFixed, MapPin, ShieldCheck, Waves } from 'lucide-react';
+import { ArrowLeft, CalendarClock, Camera, Check, ChevronRight, ClipboardCheck, Download, ExternalLink, FileText, Images, LoaderCircle, LocateFixed, MapPin, ShieldCheck, Waves } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -10,6 +10,19 @@ import { Input } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
 
 type PhotoSlot = 'overview' | 'outfall' | 'infrastructure';
+
+type CapturedPhoto = {
+  url: string;
+  capturedAt: string;
+  coordinates: string;
+};
+
+type PreparedFile = {
+  name: string;
+  label: string;
+  url: string;
+  size: number;
+};
 
 const photoSlots: Array<{ id: PhotoSlot; title: string; hint: string }> = [
   { id: 'overview', title: 'Общий вид', hint: 'Дорога и место целиком' },
@@ -95,6 +108,101 @@ function isSubmissionDue(checkAt: string) {
   return new Date(checkAt).getTime() <= new Date().getTime();
 }
 
+function canvasBlob(canvas: HTMLCanvasElement, quality = 0.78) {
+  return new Promise<Blob>((resolve, reject) => canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('Не удалось подготовить изображение')), 'image/jpeg', quality));
+}
+
+function loadImage(url: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('Не удалось прочитать фотографию'));
+    image.src = url;
+  });
+}
+
+function wrapCanvasText(context: CanvasRenderingContext2D, text: string, maxWidth: number) {
+  const lines: string[] = [];
+  for (const paragraph of text.split('\n')) {
+    if (!paragraph.trim()) {
+      lines.push('');
+      continue;
+    }
+    const words = paragraph.split(/\s+/);
+    let line = '';
+    for (const word of words) {
+      const candidate = line ? `${line} ${word}` : word;
+      if (context.measureText(candidate).width <= maxWidth || !line) line = candidate;
+      else {
+        lines.push(line);
+        line = word;
+      }
+    }
+    if (line) lines.push(line);
+  }
+  return lines;
+}
+
+async function makeWatermarkedPhoto(photo: CapturedPhoto, label: string, fallbackCoordinates: string, maxSide = 1500, quality = 0.76) {
+  const image = await loadImage(photo.url);
+  const scale = Math.min(1, maxSide / Math.max(image.naturalWidth, image.naturalHeight));
+  const width = Math.round(image.naturalWidth * scale);
+  const height = Math.round(image.naturalHeight * scale);
+  const stripHeight = Math.max(130, Math.round(height * 0.12));
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('Canvas недоступен');
+  context.drawImage(image, 0, 0, width, height);
+  context.fillStyle = 'rgba(0, 0, 0, 0.72)';
+  context.fillRect(0, height - stripHeight, width, stripHeight);
+  const padding = Math.max(24, Math.round(width * 0.025));
+  const titleSize = Math.max(24, Math.round(width * 0.028));
+  const detailSize = Math.max(20, Math.round(width * 0.022));
+  context.fillStyle = '#fff';
+  context.font = `700 ${titleSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif`;
+  context.fillText(label, padding, height - stripHeight + padding + titleSize);
+  context.fillStyle = '#e5e7eb';
+  context.font = `500 ${detailSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif`;
+  const capturedAt = new Date(photo.capturedAt).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'medium' });
+  const details = `${capturedAt} · Координаты: ${photo.coordinates || fallbackCoordinates || 'не указаны'}`;
+  context.fillText(details, padding, height - padding, width - padding * 2);
+  return canvasBlob(canvas, quality);
+}
+
+async function makeStatementImage(text: string) {
+  const width = 1400;
+  const padding = 90;
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('Canvas недоступен');
+  context.font = '32px -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif';
+  const lines = wrapCanvasText(context, text, width - padding * 2);
+  const lineHeight = 47;
+  canvas.width = width;
+  canvas.height = Math.max(1800, padding * 2 + lines.length * lineHeight + 90);
+  const renderContext = canvas.getContext('2d');
+  if (!renderContext) throw new Error('Canvas недоступен');
+  renderContext.fillStyle = '#fff';
+  renderContext.fillRect(0, 0, canvas.width, canvas.height);
+  renderContext.fillStyle = '#111827';
+  renderContext.font = '32px -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif';
+  lines.forEach((line, index) => renderContext.fillText(line, padding, padding + (index + 1) * lineHeight));
+  return canvasBlob(canvas, 0.84);
+}
+
+function downloadPreparedFile(file: PreparedFile) {
+  const link = document.createElement('a');
+  link.href = file.url;
+  link.download = file.name;
+  link.click();
+}
+
+function formatSize(bytes: number) {
+  return `${(bytes / 1024 / 1024).toFixed(2)} МБ`;
+}
+
 const recipientRules = {
   administration: {
     shortName: 'Администрация',
@@ -102,6 +210,7 @@ const recipientRules = {
     category: 'Благоустройство → незаконный сброс / самовольная коммуникация',
     portal: 'https://dobrodel.mosreg.ru/',
     request: 'проверить законность размещения коммуникации за границами участка, установить владельца и принять меры к демонтажу и восстановлению территории',
+    shortRequest: 'Прошу обследовать место, установить источник и владельца, прекратить сброс, демонтировать незаконный выпуск и восстановить территорию.',
   },
   minecology: {
     shortName: 'Минэкологии',
@@ -109,6 +218,7 @@ const recipientRules = {
     category: 'Загрязнение почвы → сброс сточных вод',
     portal: 'https://mep.mosreg.ru/feedback',
     request: 'провести выездное обследование, отбор проб жидкости и грунта, установить источник загрязнения и рассчитать вред окружающей среде',
+    shortRequest: 'Прошу провести обследование, отобрать пробы, установить источник загрязнения, прекратить сброс и принять меры к виновному лицу.',
   },
   rospotrebnadzor: {
     shortName: 'Роспотребнадзор',
@@ -116,6 +226,7 @@ const recipientRules = {
     category: 'Санитарное состояние территории → угроза водоснабжению',
     portal: 'https://petition.rospotrebnadzor.ru/petition/',
     request: 'оценить санитарно-эпидемиологическую угрозу, включая возможное загрязнение грунтовых вод, колодцев и скважин',
+    shortRequest: 'Прошу оценить санитарную угрозу, проверить риск загрязнения грунтовых вод, колодцев и скважин и принять меры.',
   },
   rosprirodnadzor: {
     shortName: 'Росприроднадзор',
@@ -123,6 +234,7 @@ const recipientRules = {
     category: 'Водное законодательство → сброс сточных вод',
     portal: 'https://rpn.gov.ru/petition/',
     request: 'проверить попадание стоков в поверхностный водный объект и наличие оснований для федерального экологического надзора',
+    shortRequest: 'Прошу проверить попадание стоков в водный объект, установить источник, прекратить сброс и принять надзорные меры.',
   },
 } as const;
 
@@ -136,9 +248,12 @@ export function ReportForm() {
   const [flowState, setFlowState] = useState(initialDraft.flowState);
   const [signs, setSigns] = useState<string[]>(initialDraft.signs);
   const [outsideParcel, setOutsideParcel] = useState(initialDraft.outsideParcel);
-  const [photos, setPhotos] = useState<Partial<Record<PhotoSlot, string>>>({});
+  const [photos, setPhotos] = useState<Partial<Record<PhotoSlot, CapturedPhoto>>>({});
   const [locating, setLocating] = useState(false);
   const [generated, setGenerated] = useState(false);
+  const [preparingFilesFor, setPreparingFilesFor] = useState<keyof typeof recipientRules | null>(null);
+  const [preparedFiles, setPreparedFiles] = useState<Partial<Record<keyof typeof recipientRules, PreparedFile[]>>>({});
+  const [prepareErrors, setPrepareErrors] = useState<Partial<Record<keyof typeof recipientRules, string>>>({});
   const [tracking, setTracking] = useState<Record<string, string>>({});
   const [lateTracking, setLateTracking] = useState<Record<string, string>>({});
   const [submissions, setSubmissions] = useState<SubmissionRecord[]>(loadSubmissions);
@@ -167,6 +282,22 @@ export function ReportForm() {
     ].filter(Boolean);
     return `${details.join('. ')}.`;
   }, [address, coordinates, destinations, flowState, outsideParcel, settings, signs, source]);
+
+  function shortComplaintFor(key: keyof typeof recipientRules) {
+    const safeAddress = (address || 'не указан').slice(0, 120);
+    const intro = `Предполагаемый источник сброса: ${safeAddress}. Зафиксированы признаки сброса сточных вод ${sourceDescriptions[source] || 'из неустановленного источника'}.`;
+    const request = ` ${recipientRules[key].shortRequest} Подробное заявление приложено изображением.`;
+    const optional = [
+      coordinates ? ` Координаты: ${coordinates}.` : '',
+      settings.length ? ` Места выпуска: ${settings.map((value) => value.toLowerCase()).join(', ')}.` : '',
+      destinations.length ? ` Маршрут: ${destinations.map((value) => value.toLowerCase()).join(' → ')}.` : '',
+      ` Состояние: ${flowState.toLowerCase()}.`,
+      signs.length ? ` Признаки: ${signs.map((value) => value.toLowerCase()).join(', ')}.` : '',
+    ].filter(Boolean);
+    let result = intro;
+    for (const part of optional) if (`${result}${part}${request}`.length <= 500) result += part;
+    return `${result}${request}`;
+  }
 
   useEffect(() => {
     localStorage.setItem('eco-fix-draft-v1', JSON.stringify({ address, coordinates, source, destinations, settings, flowState, signs, outsideParcel }));
@@ -209,7 +340,12 @@ export function ReportForm() {
 
   function onPhoto(slot: PhotoSlot, file?: File) {
     if (!file) return;
-    setPhotos((current) => ({ ...current, [slot]: URL.createObjectURL(file) }));
+    setPhotos((current) => {
+      if (current[slot]) URL.revokeObjectURL(current[slot].url);
+      return { ...current, [slot]: { url: URL.createObjectURL(file), capturedAt: new Date(file.lastModified || Date.now()).toISOString(), coordinates } };
+    });
+    Object.values(preparedFiles).forEach((files) => files?.forEach((item) => URL.revokeObjectURL(item.url)));
+    setPreparedFiles({});
   }
 
   function complaintFor(recipient: (typeof recipientRules)[keyof typeof recipientRules]) {
@@ -218,8 +354,37 @@ export function ReportForm() {
 
   function openSubmission(key: keyof typeof recipientRules) {
     const recipient = recipientRules[key];
-    void navigator.clipboard.writeText(complaintFor(recipient));
+    void navigator.clipboard.writeText(shortComplaintFor(key));
     window.open(recipient.portal, '_blank', 'noopener,noreferrer');
+  }
+
+  async function prepareSubmissionFiles(key: keyof typeof recipientRules) {
+    const selected = photoSlots.map((slot) => ({ slot, photo: photos[slot.id] })).filter((item): item is { slot: (typeof photoSlots)[number]; photo: CapturedPhoto } => Boolean(item.photo));
+    if (selected.length !== 3) return;
+    setPreparingFilesFor(key);
+    setPrepareErrors((current) => ({ ...current, [key]: '' }));
+    try {
+      let photoBlobs = await Promise.all(selected.map(({ slot, photo }, index) => makeWatermarkedPhoto(photo, `${index + 1}. ${slot.title}`, coordinates)));
+      const statementBlob = await makeStatementImage(complaintFor(recipientRules[key]));
+      if (photoBlobs.reduce((sum, blob) => sum + blob.size, statementBlob.size) > 4.8 * 1024 * 1024) {
+        photoBlobs = await Promise.all(selected.map(({ slot, photo }, index) => makeWatermarkedPhoto(photo, `${index + 1}. ${slot.title}`, coordinates, 1200, 0.62)));
+      }
+      const blobs = [...photoBlobs, statementBlob];
+      const totalSize = blobs.reduce((sum, blob) => sum + blob.size, 0);
+      if (totalSize > 5 * 1024 * 1024) throw new Error('Пакет всё ещё превышает 5 МБ. Попробуйте переснять фотографии с меньшим разрешением.');
+      preparedFiles[key]?.forEach((item) => URL.revokeObjectURL(item.url));
+      const files = [
+        { name: '01-obshchiy-vid.jpg', label: '1. Общий вид', url: URL.createObjectURL(blobs[0]), size: blobs[0].size },
+        { name: '02-tochka-sliva.jpg', label: '2. Точка слива', url: URL.createObjectURL(blobs[1]), size: blobs[1].size },
+        { name: '03-kommunikatsiya.jpg', label: '3. Коммуникация', url: URL.createObjectURL(blobs[2]), size: blobs[2].size },
+        { name: `04-polnoe-zayavlenie-${key}.jpg`, label: '4. Полное заявление', url: URL.createObjectURL(blobs[3]), size: blobs[3].size },
+      ];
+      setPreparedFiles((current) => ({ ...current, [key]: files }));
+    } catch (error) {
+      setPrepareErrors((current) => ({ ...current, [key]: error instanceof Error ? error.message : 'Не удалось подготовить файлы' }));
+    } finally {
+      setPreparingFilesFor(null);
+    }
   }
 
   function saveTracking(key: keyof typeof recipientRules, value: string) {
@@ -273,14 +438,28 @@ export function ReportForm() {
         <div className="mx-auto max-w-2xl space-y-4 px-4 py-5">
           <section className="rounded-2xl bg-emerald-950 p-5 text-emerald-50">
             <div className="flex items-center gap-2 font-bold"><ClipboardCheck className="size-5 text-emerald-300" />Данные проверены</div>
-            <p className="mt-2 text-sm leading-6 text-emerald-50/80">Текст для каждого ведомства уже скопируется при нажатии «Открыть и подать». После перехода войдите через ЕСИА, вставьте текст и приложите три фотографии.</p>
+            <p className="mt-2 text-sm leading-6 text-emerald-50/80">Короткий текст для каждого ведомства скопируется при нажатии «Открыть и подать». Сначала сохраните четыре подготовленных JPG в «Загрузки», затем выберите их в форме ведомства.</p>
           </section>
           {recipients.map((key, index) => {
             const recipient = recipientRules[key];
+            const shortText = shortComplaintFor(key);
+            const files = preparedFiles[key] || [];
+            const isPreparing = preparingFilesFor === key;
             return (
               <section key={key} className="surface-card">
                 <div className="flex gap-3"><span className="step-number">{index + 1}</span><div className="min-w-0 flex-1"><h2 className="font-bold">{recipient.shortName}</h2><p className="mt-0.5 text-xs text-muted-foreground">{recipient.category}</p></div></div>
-                <details className="mt-4 rounded-xl bg-stone-50 p-3 text-sm"><summary className="cursor-pointer font-semibold"><FileText className="mr-1.5 inline size-4" />Посмотреть текст</summary><pre className="mt-3 whitespace-pre-wrap font-sans text-xs leading-5 text-stone-700">{complaintFor(recipient)}</pre></details>
+                <div className="mt-4 rounded-xl border border-emerald-900/15 bg-emerald-50 p-3">
+                  <div className="flex items-center justify-between gap-2"><p className="text-sm font-bold text-emerald-950">Короткий текст для формы</p><Badge variant="secondary">{shortText.length} / 500</Badge></div>
+                  <p className="mt-2 text-xs leading-5 text-emerald-950/80">{shortText}</p>
+                  <Button type="button" variant="outline" className="mt-3 h-11 w-full bg-white" onClick={() => prepareSubmissionFiles(key)} disabled={preparingFilesFor !== null}>{isPreparing ? <LoaderCircle className="animate-spin" /> : <Images />}Подготовить 4 вложения</Button>
+                  {prepareErrors[key] && <p className="mt-2 text-xs font-medium text-red-700">{prepareErrors[key]}</p>}
+                  {files.length > 0 && <div className="mt-3 space-y-2">
+                    <div className="flex items-center justify-between text-xs text-emerald-950/75"><span>3 фото с отметками + заявление JPG</span><strong>{formatSize(files.reduce((sum, file) => sum + file.size, 0))} из 5 МБ</strong></div>
+                    {files.map((file) => <Button key={file.name} type="button" variant="outline" className="h-10 w-full justify-between bg-white px-3" onClick={() => downloadPreparedFile(file)}><span className="truncate">{file.label}</span><span className="flex items-center gap-1 text-xs text-muted-foreground">{formatSize(file.size)} <Download className="size-4" /></span></Button>)}
+                    <p className="text-xs leading-5 text-emerald-950/75">Нажмите каждую из четырёх строк. На сайте ведомства выберите прикрепление файлов → «Файлы» → «Загрузки» и отметьте сохранённые JPG.</p>
+                  </div>}
+                </div>
+                <details className="mt-4 rounded-xl bg-stone-50 p-3 text-sm"><summary className="cursor-pointer font-semibold"><FileText className="mr-1.5 inline size-4" />Полное заявление</summary><pre className="mt-3 whitespace-pre-wrap font-sans text-xs leading-5 text-stone-700">{complaintFor(recipient)}</pre></details>
                 <Button onClick={() => openSubmission(key)} className="mt-3 h-12 w-full rounded-xl bg-emerald-700 text-base hover:bg-emerald-800">Открыть и подать <ExternalLink className="size-4" /></Button>
                 <div className="mt-3 rounded-xl border border-border bg-stone-50 p-3">
                   <label className="field-label" htmlFor={`tracking-${key}`}>Номер обращения — если пришёл</label>
@@ -350,13 +529,14 @@ export function ReportForm() {
         <section className="surface-card">
           <div className="section-heading"><span className="step-number">2</span><div><h2>Три фотографии</h2><p>Камера откроется сразу</p></div></div>
           <div className="grid grid-cols-3 gap-2.5">
-            {photoSlots.map((slot, index) => (
-              <label key={slot.id} className="photo-slot">
+            {photoSlots.map((slot, index) => {
+              const photo = photos[slot.id];
+              return <label key={slot.id} className="photo-slot">
                 <input type="file" accept="image/*" capture="environment" className="sr-only" onChange={(event) => onPhoto(slot.id, event.target.files?.[0])} />
-                {photos[slot.id] ? <><img src={photos[slot.id]} alt={slot.title} /><span className="photo-check"><Check /></span></> : <div className="grid aspect-[4/5] place-items-center bg-stone-100"><Camera className="size-6 text-stone-500" /></div>}
+                {photo ? <><img src={photo.url} alt={slot.title} /><span className="photo-check"><Check /></span></> : <div className="grid aspect-[4/5] place-items-center bg-stone-100"><Camera className="size-6 text-stone-500" /></div>}
                 <strong>{index + 1}. {slot.title}</strong><small>{slot.hint}</small>
-              </label>
-            ))}
+              </label>;
+            })}
           </div>
         </section>
 
