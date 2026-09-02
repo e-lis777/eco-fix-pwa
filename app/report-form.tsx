@@ -251,9 +251,12 @@ export function ReportForm() {
   const [photos, setPhotos] = useState<Partial<Record<PhotoSlot, CapturedPhoto>>>({});
   const [locating, setLocating] = useState(false);
   const [generated, setGenerated] = useState(false);
-  const [preparingFilesFor, setPreparingFilesFor] = useState<keyof typeof recipientRules | null>(null);
-  const [preparedFiles, setPreparedFiles] = useState<Partial<Record<keyof typeof recipientRules, PreparedFile[]>>>({});
-  const [prepareErrors, setPrepareErrors] = useState<Partial<Record<keyof typeof recipientRules, string>>>({});
+  const [preparingPhotos, setPreparingPhotos] = useState(false);
+  const [preparedPhotos, setPreparedPhotos] = useState<PreparedFile[]>([]);
+  const [photoPrepareError, setPhotoPrepareError] = useState('');
+  const [preparingStatementFor, setPreparingStatementFor] = useState<keyof typeof recipientRules | null>(null);
+  const [preparedStatements, setPreparedStatements] = useState<Partial<Record<keyof typeof recipientRules, PreparedFile>>>({});
+  const [statementErrors, setStatementErrors] = useState<Partial<Record<keyof typeof recipientRules, string>>>({});
   const [tracking, setTracking] = useState<Record<string, string>>({});
   const [lateTracking, setLateTracking] = useState<Record<string, string>>({});
   const [submissions, setSubmissions] = useState<SubmissionRecord[]>(loadSubmissions);
@@ -344,8 +347,10 @@ export function ReportForm() {
       if (current[slot]) URL.revokeObjectURL(current[slot].url);
       return { ...current, [slot]: { url: URL.createObjectURL(file), capturedAt: new Date(file.lastModified || Date.now()).toISOString(), coordinates } };
     });
-    Object.values(preparedFiles).forEach((files) => files?.forEach((item) => URL.revokeObjectURL(item.url)));
-    setPreparedFiles({});
+    preparedPhotos.forEach((item) => URL.revokeObjectURL(item.url));
+    Object.values(preparedStatements).forEach((item) => item && URL.revokeObjectURL(item.url));
+    setPreparedPhotos([]);
+    setPreparedStatements({});
   }
 
   function complaintFor(recipient: (typeof recipientRules)[keyof typeof recipientRules]) {
@@ -358,32 +363,46 @@ export function ReportForm() {
     window.open(recipient.portal, '_blank', 'noopener,noreferrer');
   }
 
-  async function prepareSubmissionFiles(key: keyof typeof recipientRules) {
+  async function prepareSharedPhotos() {
     const selected = photoSlots.map((slot) => ({ slot, photo: photos[slot.id] })).filter((item): item is { slot: (typeof photoSlots)[number]; photo: CapturedPhoto } => Boolean(item.photo));
     if (selected.length !== 3) return;
-    setPreparingFilesFor(key);
-    setPrepareErrors((current) => ({ ...current, [key]: '' }));
+    setPreparingPhotos(true);
+    setPhotoPrepareError('');
     try {
       let photoBlobs = await Promise.all(selected.map(({ slot, photo }, index) => makeWatermarkedPhoto(photo, `${index + 1}. ${slot.title}`, coordinates)));
-      const statementBlob = await makeStatementImage(complaintFor(recipientRules[key]));
-      if (photoBlobs.reduce((sum, blob) => sum + blob.size, statementBlob.size) > 4.8 * 1024 * 1024) {
+      if (photoBlobs.reduce((sum, blob) => sum + blob.size, 0) > 4.4 * 1024 * 1024) {
         photoBlobs = await Promise.all(selected.map(({ slot, photo }, index) => makeWatermarkedPhoto(photo, `${index + 1}. ${slot.title}`, coordinates, 1200, 0.62)));
       }
-      const blobs = [...photoBlobs, statementBlob];
-      const totalSize = blobs.reduce((sum, blob) => sum + blob.size, 0);
-      if (totalSize > 5 * 1024 * 1024) throw new Error('Пакет всё ещё превышает 5 МБ. Попробуйте переснять фотографии с меньшим разрешением.');
-      preparedFiles[key]?.forEach((item) => URL.revokeObjectURL(item.url));
+      const totalSize = photoBlobs.reduce((sum, blob) => sum + blob.size, 0);
+      if (totalSize > 4.5 * 1024 * 1024) throw new Error('Три фотографии занимают слишком много места. Попробуйте переснять их с меньшим разрешением.');
+      preparedPhotos.forEach((item) => URL.revokeObjectURL(item.url));
       const files = [
-        { name: '01-obshchiy-vid.jpg', label: '1. Общий вид', url: URL.createObjectURL(blobs[0]), size: blobs[0].size },
-        { name: '02-tochka-sliva.jpg', label: '2. Точка слива', url: URL.createObjectURL(blobs[1]), size: blobs[1].size },
-        { name: '03-kommunikatsiya.jpg', label: '3. Коммуникация', url: URL.createObjectURL(blobs[2]), size: blobs[2].size },
-        { name: `04-polnoe-zayavlenie-${key}.jpg`, label: '4. Полное заявление', url: URL.createObjectURL(blobs[3]), size: blobs[3].size },
+        { name: '01-obshchiy-vid.jpg', label: '1. Общий вид', url: URL.createObjectURL(photoBlobs[0]), size: photoBlobs[0].size },
+        { name: '02-tochka-sliva.jpg', label: '2. Точка слива', url: URL.createObjectURL(photoBlobs[1]), size: photoBlobs[1].size },
+        { name: '03-kommunikatsiya.jpg', label: '3. Коммуникация', url: URL.createObjectURL(photoBlobs[2]), size: photoBlobs[2].size },
       ];
-      setPreparedFiles((current) => ({ ...current, [key]: files }));
+      setPreparedPhotos(files);
     } catch (error) {
-      setPrepareErrors((current) => ({ ...current, [key]: error instanceof Error ? error.message : 'Не удалось подготовить файлы' }));
+      setPhotoPrepareError(error instanceof Error ? error.message : 'Не удалось подготовить фотографии');
     } finally {
-      setPreparingFilesFor(null);
+      setPreparingPhotos(false);
+    }
+  }
+
+  async function prepareStatement(key: keyof typeof recipientRules) {
+    setPreparingStatementFor(key);
+    setStatementErrors((current) => ({ ...current, [key]: '' }));
+    try {
+      const blob = await makeStatementImage(complaintFor(recipientRules[key]));
+      const photosSize = preparedPhotos.reduce((sum, file) => sum + file.size, 0);
+      if (photosSize + blob.size > 5 * 1024 * 1024) throw new Error('Общий размер фотографий и заявления превышает 5 МБ. Сначала подготовьте фотографии заново.');
+      if (preparedStatements[key]) URL.revokeObjectURL(preparedStatements[key].url);
+      const statement = { name: `04-polnoe-zayavlenie-${key}.jpg`, label: 'Полное заявление', url: URL.createObjectURL(blob), size: blob.size };
+      setPreparedStatements((current) => ({ ...current, [key]: statement }));
+    } catch (error) {
+      setStatementErrors((current) => ({ ...current, [key]: error instanceof Error ? error.message : 'Не удалось подготовить заявление' }));
+    } finally {
+      setPreparingStatementFor(null);
     }
   }
 
@@ -438,25 +457,35 @@ export function ReportForm() {
         <div className="mx-auto max-w-2xl space-y-4 px-4 py-5">
           <section className="rounded-2xl bg-emerald-950 p-5 text-emerald-50">
             <div className="flex items-center gap-2 font-bold"><ClipboardCheck className="size-5 text-emerald-300" />Данные проверены</div>
-            <p className="mt-2 text-sm leading-6 text-emerald-50/80">Короткий текст для каждого ведомства скопируется при нажатии «Открыть и подать». Сначала сохраните четыре подготовленных JPG в «Загрузки», затем выберите их в форме ведомства.</p>
+            <p className="mt-2 text-sm leading-6 text-emerald-50/80">Три фотографии подготовьте и сохраните один раз. Для каждого ведомства отдельно сохраните только его заявление JPG; короткий текст скопируется при нажатии «Открыть и подать».</p>
+          </section>
+          <section className="surface-card">
+            <div className="flex gap-3"><span className="step-number"><Images className="size-4" /></span><div><h2 className="font-bold">Общие фотографии</h2><p className="mt-0.5 text-xs text-muted-foreground">Одни и те же три файла для всех ведомств</p></div></div>
+            <Button type="button" variant="outline" className="mt-4 h-11 w-full" onClick={prepareSharedPhotos} disabled={preparingPhotos}>{preparingPhotos ? <LoaderCircle className="animate-spin" /> : <Images />}Подготовить 3 фото один раз</Button>
+            {photoPrepareError && <p className="mt-2 text-xs font-medium text-red-700">{photoPrepareError}</p>}
+            {preparedPhotos.length > 0 && <div className="mt-3 space-y-2">
+              <div className="flex items-center justify-between text-xs text-muted-foreground"><span>Фото с датой, временем и координатами</span><strong>{formatSize(preparedPhotos.reduce((sum, file) => sum + file.size, 0))}</strong></div>
+              {preparedPhotos.map((file) => <Button key={file.name} type="button" variant="outline" className="h-10 w-full justify-between bg-white px-3" onClick={() => downloadPreparedFile(file)}><span className="truncate">{file.label}</span><span className="flex items-center gap-1 text-xs text-muted-foreground">{formatSize(file.size)} <Download className="size-4" /></span></Button>)}
+              <p className="text-xs leading-5 text-muted-foreground">Сохраните эти три JPG в «Загрузки» один раз и прикладывайте их к каждому обращению.</p>
+            </div>}
           </section>
           {recipients.map((key, index) => {
             const recipient = recipientRules[key];
             const shortText = shortComplaintFor(key);
-            const files = preparedFiles[key] || [];
-            const isPreparing = preparingFilesFor === key;
+            const statement = preparedStatements[key];
+            const packageSize = preparedPhotos.reduce((sum, file) => sum + file.size, statement?.size || 0);
+            const isPreparing = preparingStatementFor === key;
             return (
               <section key={key} className="surface-card">
                 <div className="flex gap-3"><span className="step-number">{index + 1}</span><div className="min-w-0 flex-1"><h2 className="font-bold">{recipient.shortName}</h2><p className="mt-0.5 text-xs text-muted-foreground">{recipient.category}</p></div></div>
                 <div className="mt-4 rounded-xl border border-emerald-900/15 bg-emerald-50 p-3">
                   <div className="flex items-center justify-between gap-2"><p className="text-sm font-bold text-emerald-950">Короткий текст для формы</p><Badge variant="secondary">{shortText.length} / 500</Badge></div>
                   <p className="mt-2 text-xs leading-5 text-emerald-950/80">{shortText}</p>
-                  <Button type="button" variant="outline" className="mt-3 h-11 w-full bg-white" onClick={() => prepareSubmissionFiles(key)} disabled={preparingFilesFor !== null}>{isPreparing ? <LoaderCircle className="animate-spin" /> : <Images />}Подготовить 4 вложения</Button>
-                  {prepareErrors[key] && <p className="mt-2 text-xs font-medium text-red-700">{prepareErrors[key]}</p>}
-                  {files.length > 0 && <div className="mt-3 space-y-2">
-                    <div className="flex items-center justify-between text-xs text-emerald-950/75"><span>3 фото с отметками + заявление JPG</span><strong>{formatSize(files.reduce((sum, file) => sum + file.size, 0))} из 5 МБ</strong></div>
-                    {files.map((file) => <Button key={file.name} type="button" variant="outline" className="h-10 w-full justify-between bg-white px-3" onClick={() => downloadPreparedFile(file)}><span className="truncate">{file.label}</span><span className="flex items-center gap-1 text-xs text-muted-foreground">{formatSize(file.size)} <Download className="size-4" /></span></Button>)}
-                    <p className="text-xs leading-5 text-emerald-950/75">Нажмите каждую из четырёх строк. На сайте ведомства выберите прикрепление файлов → «Файлы» → «Загрузки» и отметьте сохранённые JPG.</p>
+                  <Button type="button" variant="outline" className="mt-3 h-11 w-full bg-white" onClick={() => prepareStatement(key)} disabled={preparingStatementFor !== null}>{isPreparing ? <LoaderCircle className="animate-spin" /> : <FileText />}Подготовить заявление JPG</Button>
+                  {statementErrors[key] && <p className="mt-2 text-xs font-medium text-red-700">{statementErrors[key]}</p>}
+                  {statement && <div className="mt-3 space-y-2">
+                    <Button type="button" variant="outline" className="h-10 w-full justify-between bg-white px-3" onClick={() => downloadPreparedFile(statement)}><span className="truncate">Скачать заявление JPG</span><span className="flex items-center gap-1 text-xs text-muted-foreground">{formatSize(statement.size)} <Download className="size-4" /></span></Button>
+                    <div className="flex items-center justify-between text-xs text-emerald-950/75"><span>3 общих фото + это заявление</span><strong>{formatSize(packageSize)} из 5 МБ</strong></div>
                   </div>}
                 </div>
                 <details className="mt-4 rounded-xl bg-stone-50 p-3 text-sm"><summary className="cursor-pointer font-semibold"><FileText className="mr-1.5 inline size-4" />Полное заявление</summary><pre className="mt-3 whitespace-pre-wrap font-sans text-xs leading-5 text-stone-700">{complaintFor(recipient)}</pre></details>
